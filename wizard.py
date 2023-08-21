@@ -84,8 +84,9 @@ def is_pci_bridge_of_device(pci_bridge_device: str, device: str):
     if len(parsed_bridge_device) != 3:
         raise WizardError(f"Cannot parse PCI bridge device: '{pci_bridge_device}'")
     domain, bus, _ = parsed_bridge_device
-    device_path = f"/sys/devices/pci{domain}:{bus}/{pci_bridge_device}/{device}"
-    return os.path.exists(device_path)
+    device_path = f"/sys/bus/pci/devices/{device}"
+    real_device_path = f"/sys/devices/pci{domain}:{bus}/{pci_bridge_device}/{device}"
+    return os.path.realpath(device_path) == real_device_path
 
 
 def is_pci_supplier_of_device(pci_supplier_device: str, device: str):

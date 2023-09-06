@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import sys
+import re
 
 from dialog import Dialog
 from textwrap import wrap
@@ -156,6 +157,32 @@ def select_gpu_compatible(allow_pci_bridge=True):
     return gpu_list, bad_isolation_groups
 
 
+def get_current_partition():
+    cwd = os.path.dirname(__file__)
+
+    with open("/proc/mounts", "r") as mounts_file:
+        for line in mounts_file:
+            parts = line.split()
+            if len(parts) >= 2:
+                device, mount_point = parts[0], parts[1]
+                if cwd.startswith(mount_point):
+                    return device
+    return None
+
+
+def get_partition_by_partlabel(partlabel):
+    try:
+        blkid_output = subprocess.check_output(["blkid"]).decode("utf-8").splitlines()
+        pattern = rf'(.*):.*\s+LABEL="({partlabel})"\s+.*'
+        for line in blkid_output:
+            match = re.search(pattern, line)
+            if match:
+                return match.group(1)
+    except Exception as e:
+        raise WizardError(f"An error occurred: {e}")
+    return ""
+
+
 class WizardDialog:
     dialog = Dialog(dialog="dialog", pass_args_via_file=False)
 
@@ -180,6 +207,22 @@ class WizardDialog:
             return True
         elif code == cls.dialog.CANCEL:
             return False
+        elif code == cls.dialog.ESC:
+            sys.exit("Escape key pressed. Exiting.")
+
+    @classmethod
+    def inputbox(cls, text, **info):
+        default = {"colors": True, "width": 72, "height": 8}
+        default.update(info)
+
+        if not default["height"]:
+            default["height"] = cls._auto_height(default["width"], default["text"])
+
+        code, input_content = cls.dialog.inputbox(text, **default)
+        if code == cls.dialog.OK:
+            return input_content
+        elif code == cls.dialog.CANCEL:
+            return None
         elif code == cls.dialog.ESC:
             sys.exit("Escape key pressed. Exiting.")
 
@@ -221,6 +264,14 @@ def main():
     args = parse_args()
 
     d = WizardDialog()
+    default_partition = get_partition_by_partlabel("GOLEM Storage")
+    storage_partition = d.inputbox(
+        "Storage partition selection",
+        init=default_partition,
+    )
+    if not storage_partition:
+        raise WizardError("No persistent storage defined.")
+
     if d.yesno("Do you want to select a GPU?"):
         gpu_list, bad_isolation_groups = select_gpu_compatible(
             allow_pci_bridge=args.relax_gpu_isolation
